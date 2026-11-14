@@ -210,7 +210,7 @@ function formatCurrency(amount: number, currency: string): string {
 }
 
 /**
- * Encode configuration to URL-safe string
+ * Encode configuration as versioned UTF-8 Base64. The caller serializes the query parameter.
  */
 export function encodeConfigurationToUrl(config: Configuration): string {
   const data = JSON.stringify({
@@ -220,23 +220,92 @@ export function encodeConfigurationToUrl(config: Configuration): string {
     n: config.name,
   });
 
-  return btoa(data);
+  const bytes = new TextEncoder().encode(data);
+  return `v1.${btoa(Array.from(bytes, (byte) => String.fromCharCode(byte)).join(''))}`;
 }
 
 /**
  * Decode configuration from URL string
  */
-export function decodeConfigurationFromUrl(encoded: string): Partial<Configuration> | null {
+export function decodeConfigurationFromUrl(
+  encoded: string,
+  product?: Product,
+): Pick<Configuration, 'selections' | 'addOns' | 'quantity' | 'name'> | null {
   try {
-    const data = JSON.parse(atob(encoded));
+    // A marker distinguishes UTF-8 from legacy btoa(JSON) Latin-1 without guessing.
+    const isUtf8 = encoded.startsWith('v1.');
+    // Old links concatenated raw Base64, so query parsing can turn '+' into spaces.
+    const binary = atob((isUtf8 ? encoded.slice(3) : encoded).replace(/ /g, '+'));
+    const json = isUtf8
+      ? new TextDecoder('utf-8', { fatal: true }).decode(
+          Uint8Array.from(binary, (character) => character.charCodeAt(0)),
+        )
+      : binary;
+    const data = JSON.parse(json);
+    if (
+      !data ||
+      typeof data !== 'object' ||
+      Array.isArray(data) ||
+      !data.s ||
+      typeof data.s !== 'object' ||
+      Array.isArray(data.s) ||
+      !Object.values(data.s).every(
+        (value) =>
+          typeof value === 'string' ||
+          typeof value === 'boolean' ||
+          (typeof value === 'number' && Number.isFinite(value)),
+      ) ||
+      !Array.isArray(data.a) ||
+      !data.a.every((id: unknown) => typeof id === 'string') ||
+      !Number.isSafeInteger(data.q) ||
+      data.q < 1 ||
+      (data.n !== undefined && typeof data.n !== 'string')
+    ) {
+      return null;
+    }
+
+    if (product) {
+      const quantityOption = product.options.find((option) => option.type === 'quantity');
+      if (data.q < (quantityOption?.min ?? 1) || data.q > (quantityOption?.max ?? 999)) {
+        return null;
+      }
+      for (const [id, value] of Object.entries(data.s)) {
+        const option = product.options.find((option) => option.id === id);
+        if (!option) return null;
+        if (option.type === 'toggle') {
+          if (typeof value !== 'boolean') return null;
+        } else if (option.type === 'quantity') {
+          if (
+            typeof value !== 'number' ||
+            !Number.isSafeInteger(value) ||
+            value < (option.min ?? 1) ||
+            value > (option.max ?? 999)
+          )
+            return null;
+        } else if (!option.choices?.some((choice) => choice.available && choice.value === value)) {
+          return null;
+        }
+      }
+      if (
+        product.options.some(
+          (option) =>
+            option.required &&
+            option.type !== 'quantity' &&
+            (!option.dependsOn ||
+              data.s[option.dependsOn.optionId] === option.dependsOn.requiredValue) &&
+            !Object.hasOwn(data.s, option.id),
+        )
+      )
+        return null;
+    }
+
     return {
-      selections: data.s || {},
-      addOns: data.a || [],
-      quantity: data.q || 1,
+      selections: data.s,
+      addOns: [...new Set<string>(data.a)],
+      quantity: data.q,
       name: data.n,
     };
-  } catch (e) {
-    console.error('Failed to decode configuration:', e);
+  } catch {
     return null;
   }
 }

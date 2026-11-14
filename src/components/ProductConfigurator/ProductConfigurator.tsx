@@ -146,6 +146,7 @@ export const ProductConfigurator: React.FC<ProductConfiguratorProps> = ({
   const [isDirty, setIsDirty] = useState(false);
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
   const [draftName, setDraftName] = useState('');
+  const [configurationName, setConfigurationName] = useState(initialConfiguration?.name);
 
   const [showDraftModal, setShowDraftModal] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
@@ -161,8 +162,6 @@ export const ProductConfigurator: React.FC<ProductConfiguratorProps> = ({
 
   const [error, setError] = useState<string | null>(null);
 
-  const [shareUrl, setShareUrl] = useState<string>('');
-
   const containerRef = useRef<HTMLDivElement>(null);
   const colorPickerRef = useRef<HTMLDivElement>(null);
   const lastFocusedElement = useRef<HTMLElement | null>(null);
@@ -173,7 +172,8 @@ export const ProductConfigurator: React.FC<ProductConfiguratorProps> = ({
   // Derived State
   // -------------------------------------------------------------------------
 
-  const currentConfig: Configuration = useMemo(
+  // Names are metadata; editing them must not invalidate price or validation results.
+  const calculationConfig: Configuration = useMemo(
     () => ({
       id: configId,
       productId: product.id,
@@ -182,21 +182,30 @@ export const ProductConfigurator: React.FC<ProductConfiguratorProps> = ({
       quantity,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
-      name: draftName || undefined,
     }),
-    [configId, product.id, selections, selectedAddOns, quantity, draftName],
+    [configId, product.id, selections, selectedAddOns, quantity],
   );
+  const currentConfig = useMemo(
+    () => ({ ...calculationConfig, name: configurationName }),
+    [calculationConfig, configurationName],
+  );
+  const shareUrl = useMemo(() => {
+    if (!showShareModal) return '';
+    const url = new URL(window.location.href);
+    url.searchParams.set('config', encodeConfigurationToUrl(currentConfig));
+    return url.toString();
+  }, [showShareModal, currentConfig]);
 
   const {
     price,
     formattedTotal,
     isLoading: isPriceLoading,
     error: priceError,
-  } = usePriceCalculation(currentConfig, product);
+  } = usePriceCalculation(calculationConfig, product);
 
   const validationRequest = useMemo(
-    () => ({ config: currentConfig, product }),
-    [currentConfig, product],
+    () => ({ config: calculationConfig, product }),
+    [calculationConfig, product],
   );
   const currentValidation = validationState?.request === validationRequest ? validationState : null;
   const validation = currentValidation?.result;
@@ -269,7 +278,7 @@ export const ProductConfigurator: React.FC<ProductConfiguratorProps> = ({
 
     const updatePreview = async () => {
       try {
-        const preview = await generatePreview(currentConfig, product);
+        const preview = await generatePreview(calculationConfig, product);
         if (!cancelled) {
           setPreviewUrl(preview.imageUrl);
         }
@@ -283,12 +292,15 @@ export const ProductConfigurator: React.FC<ProductConfiguratorProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [currentConfig, product]);
+  }, [calculationConfig, product]);
 
   useEffect(() => {
     if (onConfigurationChange) {
       onConfigurationChange(currentConfig);
     }
+  }, [currentConfig, onConfigurationChange]);
+
+  useEffect(() => {
     setIsDirty(true);
   }, [selections, selectedAddOns, quantity]);
 
@@ -299,28 +311,17 @@ export const ProductConfigurator: React.FC<ProductConfiguratorProps> = ({
   }, [showDraftModal]);
 
   useEffect(() => {
-    if (showShareModal) {
-      const encoded = encodeConfigurationToUrl(currentConfig);
-      const url = `${window.location.origin}${window.location.pathname}?config=${encoded}`;
-      setShareUrl(url);
-    }
-  }, [showShareModal, currentConfig]);
-
-  useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const encodedConfig = params.get('config');
 
     if (encodedConfig) {
-      const decoded = decodeConfigurationFromUrl(encodedConfig);
+      const decoded = decodeConfigurationFromUrl(encodedConfig, initialProductRef.current);
       if (decoded) {
-        setOptionState((prev) =>
-          getOptionState(
-            initialProductRef.current,
-            decoded.selections || prev.selections,
-            decoded.addOns || prev.selectedAddOns,
-          ),
+        setOptionState(
+          getOptionState(initialProductRef.current, decoded.selections, decoded.addOns),
         );
-        if (decoded.quantity) setQuantity(decoded.quantity);
+        setQuantity(decoded.quantity);
+        setConfigurationName(decoded.name);
       }
     }
   }, []);
@@ -378,7 +379,9 @@ export const ProductConfigurator: React.FC<ProductConfiguratorProps> = ({
 
   const handleSaveDraft = useCallback(async () => {
     try {
-      await saveDraft(currentConfig, draftName || 'Untitled Draft');
+      const name = draftName || currentConfig.name || 'Untitled Draft';
+      await saveDraft({ ...currentConfig, name }, name);
+      setConfigurationName(name);
       setLastSaved(new Date());
       setIsDirty(false);
       setDraftName('');
@@ -398,6 +401,7 @@ export const ProductConfigurator: React.FC<ProductConfiguratorProps> = ({
             getOptionState(product, draft.configuration.selections, draft.configuration.addOns),
           );
           setQuantity(draft.configuration.quantity);
+          setConfigurationName(draft.configuration.name ?? draft.name);
           setShowDraftModal(false);
           setIsDirty(false);
         }
