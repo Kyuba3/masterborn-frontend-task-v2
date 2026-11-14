@@ -139,8 +139,11 @@ export const ProductConfigurator: React.FC<ProductConfiguratorProps> = ({
   const [showShareModal, setShowShareModal] = useState(false);
   const [drafts, setDrafts] = useState<Draft[]>([]);
 
-  const [validation, setValidation] = useState<ValidationResult | null>(null);
-  const [isValid, setIsValid] = useState(false);
+  const [validationState, setValidationState] = useState<{
+    request: { config: Configuration; product: Product };
+    result: ValidationResult | null;
+    error: string | null;
+  } | null>(null);
 
   const [previewUrl, setPreviewUrl] = useState<string>(product.imageUrl);
 
@@ -177,6 +180,16 @@ export const ProductConfigurator: React.FC<ProductConfiguratorProps> = ({
     error: priceError,
   } = usePriceCalculation(currentConfig, product);
 
+  const validationRequest = useMemo(
+    () => ({ config: currentConfig, product }),
+    [currentConfig, product],
+  );
+  const currentValidation = validationState?.request === validationRequest ? validationState : null;
+  const validation = currentValidation?.result;
+  const validationError = currentValidation?.error;
+  const canAddToCart =
+    !readOnly && validation?.valid === true && price !== null && !isPriceLoading && !priceError;
+
   const appliedDiscount = getAppliedDiscountPercentage(quantity);
   const nextTier = getNextDiscountTier(quantity);
 
@@ -212,12 +225,22 @@ export const ProductConfigurator: React.FC<ProductConfiguratorProps> = ({
 
     const validate = async () => {
       try {
-        const result = await validateConfiguration(currentConfig, product);
+        const result = await validateConfiguration(
+          validationRequest.config,
+          validationRequest.product,
+        );
         if (!cancelled) {
-          setValidation(result);
-          setIsValid(true);
+          setValidationState({ request: validationRequest, result, error: null });
         }
-      } catch {}
+      } catch {
+        if (!cancelled) {
+          setValidationState({
+            request: validationRequest,
+            result: null,
+            error: ERROR_CODES.UNKNOWN,
+          });
+        }
+      }
     };
 
     validate();
@@ -225,7 +248,7 @@ export const ProductConfigurator: React.FC<ProductConfiguratorProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [currentConfig, product]);
+  }, [validationRequest]);
 
   useEffect(() => {
     let cancelled = false;
@@ -385,21 +408,15 @@ export const ProductConfigurator: React.FC<ProductConfiguratorProps> = ({
   }, []);
 
   const handleAddToCart = useCallback(() => {
-    if (!validation?.valid) {
-      setError(validation?.errors[0]?.code || ERROR_CODES.UNKNOWN);
+    if (!canAddToCart || !price) {
+      if (validation && !validation.valid) {
+        setError(validation.errors[0]?.code || ERROR_CODES.UNKNOWN);
+      }
       return;
     }
 
-    if (price && onAddToCart) {
-      onAddToCart(currentConfig, price);
-    }
-  }, [validation, price, currentConfig, onAddToCart]);
-
-  const handleQuickAdd = useCallback(() => {
-    if (price && onAddToCart) {
-      onAddToCart(currentConfig, price);
-    }
-  }, [price, currentConfig, onAddToCart]);
+    onAddToCart?.(currentConfig, price);
+  }, [canAddToCart, validation, price, currentConfig, onAddToCart]);
 
   const handleCopyShareUrl = useCallback(() => {
     navigator.clipboard
@@ -842,10 +859,10 @@ export const ProductConfigurator: React.FC<ProductConfiguratorProps> = ({
         </div>
       </div>
 
-      {(error || priceError) && (
+      {(error || priceError || validationError) && (
         <div className="error-message">
           <div>Something went wrong. Please try again.</div>
-          <div className="error-code">Error: {error || priceError}</div>
+          <div className="error-code">Error: {error || priceError || validationError}</div>
         </div>
       )}
 
@@ -881,15 +898,17 @@ export const ProductConfigurator: React.FC<ProductConfiguratorProps> = ({
             {renderPriceBreakdown()}
 
             <div className="validation-indicator">
-              {isValid ? '✓ Configuration validated' : '⏳ Validating…'}
+              {validation
+                ? validation.valid
+                  ? '✓ Configuration validated'
+                  : '✗ Configuration invalid'
+                : validationError
+                  ? '✗ Validation failed'
+                  : '⏳ Validating…'}
             </div>
 
             <div className="quick-add-section">
-              <button
-                className="quick-add-btn"
-                onClick={handleQuickAdd}
-                disabled={readOnly || !validation?.valid}
-              >
+              <button className="quick-add-btn" onClick={handleAddToCart} disabled={!canAddToCart}>
                 ⚡ Quick Add to Cart
               </button>
             </div>
@@ -898,7 +917,7 @@ export const ProductConfigurator: React.FC<ProductConfiguratorProps> = ({
           <button
             className="btn btn-success btn-block"
             onClick={handleAddToCart}
-            disabled={readOnly || !validation?.valid || isPriceLoading}
+            disabled={!canAddToCart}
           >
             {isPriceLoading ? 'Calculating...' : 'Add to Cart'}
           </button>
