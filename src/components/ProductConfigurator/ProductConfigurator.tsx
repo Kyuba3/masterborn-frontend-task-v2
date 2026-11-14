@@ -90,6 +90,18 @@ const isAddOnAvailable = (
   return dependencyValue === addOn.dependsOn.requiredValue;
 };
 
+const getOptionState = (
+  product: Product,
+  selections: Configuration['selections'],
+  selectedAddOns: string[],
+) => ({
+  selections,
+  selectedAddOns: selectedAddOns.filter((id) => {
+    const addOn = product.addOns.find((candidate) => candidate.id === id);
+    return addOn !== undefined && isAddOnAvailable(addOn, selections);
+  }),
+});
+
 const formatTimestamp = (isoString: string): string => {
   const date = new Date(isoString);
   return date.toLocaleString();
@@ -119,12 +131,12 @@ export const ProductConfigurator: React.FC<ProductConfiguratorProps> = ({
   // State
   // -------------------------------------------------------------------------
 
-  const [selections, setSelections] = useState<Record<string, string | number | boolean>>(
-    () => initialConfiguration?.selections || getDefaultSelections(product),
-  );
-
-  const [selectedAddOns, setSelectedAddOns] = useState<string[]>(
-    () => initialConfiguration?.addOns || [],
+  const [{ selections, selectedAddOns }, setOptionState] = useState(() =>
+    getOptionState(
+      product,
+      initialConfiguration?.selections || getDefaultSelections(product),
+      initialConfiguration?.addOns || [],
+    ),
   );
 
   const [quantity, setQuantity] = useState<number>(() => initialConfiguration?.quantity || 1);
@@ -154,6 +166,8 @@ export const ProductConfigurator: React.FC<ProductConfiguratorProps> = ({
   const containerRef = useRef<HTMLDivElement>(null);
   const colorPickerRef = useRef<HTMLDivElement>(null);
   const lastFocusedElement = useRef<HTMLElement | null>(null);
+  // Shared URLs are restored once against the product supplied at mount.
+  const initialProductRef = useRef(product);
 
   // -------------------------------------------------------------------------
   // Derived State
@@ -299,8 +313,13 @@ export const ProductConfigurator: React.FC<ProductConfiguratorProps> = ({
     if (encodedConfig) {
       const decoded = decodeConfigurationFromUrl(encodedConfig);
       if (decoded) {
-        if (decoded.selections) setSelections(decoded.selections);
-        if (decoded.addOns) setSelectedAddOns(decoded.addOns);
+        setOptionState((prev) =>
+          getOptionState(
+            initialProductRef.current,
+            decoded.selections || prev.selections,
+            decoded.addOns || prev.selectedAddOns,
+          ),
+        );
         if (decoded.quantity) setQuantity(decoded.quantity);
       }
     }
@@ -312,29 +331,11 @@ export const ProductConfigurator: React.FC<ProductConfiguratorProps> = ({
 
   const handleOptionChange = useCallback(
     (optionId: string, value: string | number | boolean) => {
-      setSelections((prev) => ({
-        ...prev,
-        [optionId]: value,
-      }));
-
-      const option = product.options.find((o) => o.id === optionId);
-      // Clean up any dependent add-ons whose requirement is no longer met.
-      // Toggles are handled in handleAddOnToggle, so we only need to do this for select options.
-      if (option && option.type === 'select') {
-        const dependentAddOns = product.addOns.filter((a) => a.dependsOn?.optionId === optionId);
-
-        for (const addOn of dependentAddOns) {
-          if (addOn.dependsOn && value !== addOn.dependsOn.requiredValue) {
-            const index = selectedAddOns.indexOf(addOn.id);
-            if (index > -1) {
-              selectedAddOns.splice(index, 1);
-              setSelectedAddOns(selectedAddOns);
-            }
-          }
-        }
-      }
+      setOptionState((prev) =>
+        getOptionState(product, { ...prev.selections, [optionId]: value }, prev.selectedAddOns),
+      );
     },
-    [product.options, product.addOns, selectedAddOns],
+    [product],
   );
 
   const handleAddOnToggle = useCallback(
@@ -347,15 +348,20 @@ export const ProductConfigurator: React.FC<ProductConfiguratorProps> = ({
         return;
       }
 
-      setSelectedAddOns((prev) => {
-        if (prev.includes(addOnId)) {
-          return prev.filter((id) => id !== addOnId);
-        } else {
-          return [...prev, addOnId];
-        }
+      setOptionState((prev) => {
+        // Check the queued state too: an earlier option change may have disabled this add-on.
+        if (!isAddOnAvailable(addOn, prev.selections)) return prev;
+
+        return getOptionState(
+          product,
+          prev.selections,
+          prev.selectedAddOns.includes(addOnId)
+            ? prev.selectedAddOns.filter((id) => id !== addOnId)
+            : [...prev.selectedAddOns, addOnId],
+        );
       });
     },
-    [product.addOns, selections],
+    [product, selections],
   );
 
   const handleQuantityChange = useCallback(
@@ -383,20 +389,24 @@ export const ProductConfigurator: React.FC<ProductConfiguratorProps> = ({
     }
   }, [currentConfig, draftName]);
 
-  const handleLoadDraft = useCallback(async (draftId: string) => {
-    try {
-      const draft = await loadDraft(draftId);
-      if (draft) {
-        setSelections(draft.configuration.selections);
-        setSelectedAddOns(draft.configuration.addOns);
-        setQuantity(draft.configuration.quantity);
-        setShowDraftModal(false);
-        setIsDirty(false);
+  const handleLoadDraft = useCallback(
+    async (draftId: string) => {
+      try {
+        const draft = await loadDraft(draftId);
+        if (draft) {
+          setOptionState(
+            getOptionState(product, draft.configuration.selections, draft.configuration.addOns),
+          );
+          setQuantity(draft.configuration.quantity);
+          setShowDraftModal(false);
+          setIsDirty(false);
+        }
+      } catch {
+        setError(ERROR_CODES.UNKNOWN);
       }
-    } catch {
-      setError(ERROR_CODES.UNKNOWN);
-    }
-  }, []);
+    },
+    [product],
+  );
 
   const handleDeleteDraft = useCallback(async (draftId: string) => {
     try {
@@ -449,8 +459,7 @@ export const ProductConfigurator: React.FC<ProductConfiguratorProps> = ({
   );
 
   const handleDiscardChanges = useCallback(() => {
-    setSelections(getDefaultSelections(product));
-    setSelectedAddOns([]);
+    setOptionState(getOptionState(product, getDefaultSelections(product), []));
     setQuantity(1);
     setIsDirty(false);
   }, [product]);
@@ -952,8 +961,8 @@ export const ProductConfigurator: React.FC<ProductConfiguratorProps> = ({
                 <span>
                   {selectedAddOns
                     .map((id) => {
-                      const addOn = availableAddOns.get(id)!;
-                      return formatPrice(addOn.price, product.currency);
+                      const addOn = availableAddOns.get(id);
+                      return addOn ? formatPrice(addOn.price, product.currency) : null;
                     })
                     .join(' + ')}
                 </span>
