@@ -1,51 +1,52 @@
-# Submission: [Your Name]
+# Submission: Jakub Kołodziej
 
 ## Time Spent
 
-Total time: **\_\_** (approximate)
+Total time: **around 4 hours**
 
 ## Ticket Triage
 
 ### Tickets I Addressed
 
-List the ticket numbers you worked on, in the order you addressed them:
+| Ticket  | Changes                                                                                     |
+| ------- | ------------------------------------------------------------------------------------------- |
+| CFG-142 | Fixed async pricing races and prevented cart actions with stale or invalid results.         |
+| CFG-148 | Fixed the Packaging dependency crash and inconsistent add-on state.                         |
+| CFG-147 | Fixed shared URLs, Unicode encoding, payload validation and configuration-name persistence. |
+| CFG-152 | Improved keyboard accessibility, form controls and modal focus handling.                    |
+| CFG-143 | Fixed resize listener cleanup and stale preview updates.                                    |
+| CFG-151 | Replaced technical errors with helpful messages and improved retry handling.                |
 
-1. **CFG-XXX**: [Brief description of what you did]
-2. **CFG-XXX**: [Brief description of what you did]
-3. ...
+**Also covered:** CFG-149's loading feedback works with the corrected pricing state. CFG-156's reported lists have keys. CFG-158's configuration objects are memoized, although performance gains have not been measured.
 
 ### Tickets I Deprioritized
 
-List tickets you intentionally skipped and why:
-
-| Ticket  | Reason                 |
-| ------- | ---------------------- |
-| CFG-XXX | [Why you skipped this] |
-| CFG-XXX | [Why you skipped this] |
+| Ticket  | Reason                                                                                      |
+| ------- | ------------------------------------------------------------------------------------------- |
+| CFG-146 | Minor timezone issue not reproduced.                                                        |
+| CFG-150 | Missing reference screenshot; no confirmed mobile layout defect.                            |
+| CFG-153 | Multiweek feature, outside the task's scope.                                                |
+| CFG-155 | Dark mode requires broader design and CSS changes.                                          |
+| CFG-157 | Full unsaved-changes confirmation flow deferred; existing dirty-state bug fixed separately. |
 
 ### Tickets That Need Clarification
 
-List any tickets where you couldn't proceed due to ambiguity:
-
-| Ticket  | Question                  |
-| ------- | ------------------------- |
-| CFG-XXX | [What you needed to know] |
+| Ticket        | Reason                                                                                                           |
+| ------------- | ---------------------------------------------------------------------------------------------------------------- |
+| CFG-144 / 145 | Conflicting requests to remove Quick Add and add a mandatory demo shortcut. Kept the existing feature unchanged. |
+| CFG-154       | Conflicting discount thresholds and rates. Financial rules need Product/Finance approval.                        |
 
 ### Tickets With a Misleading Priority Label
 
-Our board labels aren't always right. List tickets where you disagreed with the label (e.g. a Low that's actually High, a High that's actually Low, a Medium that's actually Unclear) and explain why. If you didn't disagree with any, say so.
-
-| Ticket  | Label on board | Your read    | Why                                         |
-| ------- | -------------- | ------------ | ------------------------------------------- |
-| CFG-XXX | e.g. ⚪ Low    | e.g. 🟠 High | [What in the description changed your read] |
+| Ticket  | Board   | My Assessment                                 |
+| ------- | ------- | --------------------------------------------- |
+| CFG-152 | Low     | High — accessibility is a client requirement. |
+| CFG-154 | Unclear | Requires urgent business clarification.       |
+| CFG-153 | Medium  | Defer — estimated at 2–3 weeks.               |
 
 ### Tickets Where You Stopped to Ask Instead of Implementing
 
-If a ticket was ambiguous enough that the right move was to escalate / ask PM / gather more context rather than ship a fix, list it here. We value this signal — picking one interpretation blindly and shipping it can cost more than stopping to ask.
-
-| Ticket  | Who would you ask | What you'd ask                                    |
-| ------- | ----------------- | ------------------------------------------------- |
-| CFG-XXX | e.g. PM / Finance | [The specific question + why you can't answer it] |
+CFG-144/145 requires a decision from Product and Customer Success; CFG-154 requires Product/Finance confirmation. No approvals were assumed.
 
 ---
 
@@ -53,42 +54,30 @@ If a ticket was ambiguous enough that the right move was to escalate / ask PM / 
 
 ### Critical Issues Found
 
-Describe the most important bugs you identified:
+#### Issue 1: Pricing race conditions — CFG-142
 
-#### Issue 1: [Title]
+The pricing hook compared incompatible timestamps, causing valid responses to be discarded. Overlapping requests could also produce stale prices and loading states.
 
-**Ticket(s):** CFG-XXX
+I replaced timestamp-based checks with request tracking and cleanup, and ensured cart actions use only current, validated pricing.
 
-**What was the bug?**
+#### Issue 2: Packaging dependency crash — CFG-148
 
-[Describe the root cause]
+Disabling Packaging left dependent add-ons selected, causing the summary to access missing data.
 
-**How did you find it?**
+I updated selections and add-ons together, removing unavailable dependencies and safely handling restored configurations.
 
-[Your debugging process]
+#### Issue 3: Broken shared URLs — CFG-147
 
-**How did you fix it?**
+The original Base64 encoding failed with Unicode characters, while URL handling and insufficient validation caused incorrect restoration.
 
-[Explain your solution]
-
-**Why this approach?**
-
-[Any alternatives you considered]
-
----
-
-#### Issue 2: [Title]
-
-[Same structure as above]
-
----
+I added UTF-8-safe encoding, backward-compatible decoding, payload validation and configuration-name persistence.
 
 ### Other Changes Made
 
-Brief description of any other modifications:
-
-- [Change 1]
-- [Change 2]
+- Improved accessibility with native controls, keyboard navigation and modal focus management.
+- Fixed resize listener cleanup and outdated preview updates.
+- Added user-friendly error messages and safer retries.
+- Corrected dirty-state tracking and preview URL parameters.
 
 ---
 
@@ -96,70 +85,48 @@ Brief description of any other modifications:
 
 ### Things I Noticed But Didn't Fix
 
-List any issues you noticed but intentionally left:
-
-| Issue   | Why I Left It                                         |
-| ------- | ----------------------------------------------------- |
-| [Issue] | [Reason - out of scope, time, needs discussion, etc.] |
+| Issue                | Reason                                   |
+| -------------------- | ---------------------------------------- |
+| Monolithic component | Refactoring would add regression risk.   |
+| Existing `any` types | Outside the scope of the targeted fixes. |
 
 ### Potential Improvements for the Future
 
-If you had more time, what would you improve?
-
-1. [Improvement 1]
-2. [Improvement 2]
+1. Add permanent regression tests to CI.
+2. Profile long-session performance and complete a wider accessibility audit.
 
 ---
 
 ## Questions for the Team
 
-Questions you would ask in a real scenario:
-
-1. [Question 1]
-2. [Question 2]
+1. Can QA provide reproduction details for CFG-146 and CFG-150?
+2. What browser and accessibility support is required for embedded widgets?
 
 ---
 
 ## Assumptions Made
 
-List any assumptions you made to proceed:
-
-1. [Assumption 1]
-2. [Assumption 2]
+1. Dependent add-ons should be removed when their prerequisites become unavailable.
+2. Invalid shared configurations should safely fall back to defaults.
 
 ---
 
 ## Self-Assessment
 
-### What went well?
+**What went well?** I focused on the most important bugs rather than trying to complete every ticket.
 
-[Your reflection]
+**What was challenging?** Tracking down the pricing race condition and deciding how to handle conflicting requirements.
 
-### What was challenging?
-
-[Your reflection]
-
-### What would you do differently with more time?
-
-[Your reflection]
+**What would you do differently with more time?** Add regression tests to CI and investigate the remaining performance and accessibility issues.
 
 ---
 
-## AI Assistance Notes (optional)
+## AI Assistance Notes
 
-If you used AI tools (Copilot, Claude, Cursor, ChatGPT, etc.), we'd love a short note on how. **We don't score the fact that you used AI — we score the quality of your reasoning and verification.**
-
-Useful things to share:
-
-- What kinds of prompts you sent (paraphrase is fine, no need to paste logs)
-- Where the AI helped and where you overrode it
-- Anything the AI suggested that you rejected — and why
-- Anything you verified manually that the AI got wrong
+I used Codex to help with implementation and testing, and ChatGPT to discuss priorities and review potential issues. I reviewed the changes myself and made the final decisions on what to fix, defer or leave for clarification.
 
 ---
 
 ## Additional Notes
 
-Anything else you want us to know:
-
-[Your notes]
+The build and TypeScript checks pass. I also tested the main user flows manually and used local regression tests to check the fixes. The test suite is not included in the submission.
