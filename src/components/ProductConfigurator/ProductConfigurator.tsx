@@ -243,6 +243,8 @@ export const ProductConfigurator: React.FC<ProductConfiguratorProps> = ({
 
     window.addEventListener('resize', handleResize);
     handleResize();
+
+    return () => window.removeEventListener('resize', handleResize);
   }, []);
 
   useEffect(() => {
@@ -285,7 +287,9 @@ export const ProductConfigurator: React.FC<ProductConfiguratorProps> = ({
           setPreviewUrl(preview.imageUrl);
         }
       } catch {
-        setPreviewUrl(product.imageUrl);
+        if (!cancelled) {
+          setPreviewUrl(product.imageUrl);
+        }
       }
     };
 
