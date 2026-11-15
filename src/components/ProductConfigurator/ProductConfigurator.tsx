@@ -30,6 +30,7 @@ import type {
 } from './types';
 import { ERROR_CODES } from './types';
 import { usePriceCalculation } from '../../hooks/usePriceCalculation';
+import { getErrorMessage, type ConfiguratorError } from '../../utils/errorMessages';
 import {
   validateConfiguration,
   saveDraft,
@@ -160,13 +161,14 @@ export const ProductConfigurator: React.FC<ProductConfiguratorProps> = ({
 
   const [previewUrl, setPreviewUrl] = useState<string>(product.imageUrl);
 
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<ConfiguratorError | null>(null);
 
   const accessibilityId = useId();
   const modalRef = useRef<HTMLDialogElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const colorPickerRef = useRef<HTMLDivElement>(null);
   const lastFocusedElement = useRef<HTMLElement | null>(null);
+  const clipboardAttemptRef = useRef(0);
   // Shared URLs are restored once against the product supplied at mount.
   const initialProductRef = useRef(product);
 
@@ -312,7 +314,9 @@ export const ProductConfigurator: React.FC<ProductConfiguratorProps> = ({
 
   useEffect(() => {
     if (showDraftModal) {
-      getAllDrafts().then(setDrafts);
+      getAllDrafts()
+        .then(setDrafts)
+        .catch(() => setError({ code: ERROR_CODES.UNKNOWN, context: 'listDrafts' }));
     }
   }, [showDraftModal]);
 
@@ -366,7 +370,7 @@ export const ProductConfigurator: React.FC<ProductConfiguratorProps> = ({
       if (!addOn) return;
 
       if (!isAddOnAvailable(addOn, selections)) {
-        setError(ERROR_CODES.DEPENDENCY_MISSING);
+        setError({ code: ERROR_CODES.DEPENDENCY_MISSING });
         return;
       }
 
@@ -399,6 +403,7 @@ export const ProductConfigurator: React.FC<ProductConfiguratorProps> = ({
   );
 
   const handleSaveDraft = useCallback(async () => {
+    setError((current) => (current?.context === 'saveDraft' ? null : current));
     try {
       const name = draftName || currentConfig.name || 'Untitled Draft';
       await saveDraft({ ...currentConfig, name }, name);
@@ -409,12 +414,13 @@ export const ProductConfigurator: React.FC<ProductConfiguratorProps> = ({
 
       setShowDraftModal(false);
     } catch {
-      setError(ERROR_CODES.UNKNOWN);
+      setError({ code: ERROR_CODES.UNKNOWN, context: 'saveDraft' });
     }
   }, [currentConfig, draftName]);
 
   const handleLoadDraft = useCallback(
     async (draftId: string) => {
+      setError((current) => (current?.context === 'loadDraft' ? null : current));
       try {
         const draft = await loadDraft(draftId);
         if (draft) {
@@ -425,28 +431,31 @@ export const ProductConfigurator: React.FC<ProductConfiguratorProps> = ({
           setConfigurationName(draft.configuration.name ?? draft.name);
           setShowDraftModal(false);
           setIsDirty(false);
+        } else {
+          setError({ code: ERROR_CODES.UNKNOWN, context: 'loadDraft' });
         }
       } catch {
-        setError(ERROR_CODES.UNKNOWN);
+        setError({ code: ERROR_CODES.UNKNOWN, context: 'loadDraft' });
       }
     },
     [product],
   );
 
   const handleDeleteDraft = useCallback(async (draftId: string) => {
+    setError((current) => (current?.context === 'deleteDraft' ? null : current));
     try {
       await deleteDraft(draftId);
       setDrafts((prev) => prev.filter((d) => d.id !== draftId));
       modalRef.current?.querySelector('input')?.focus();
     } catch {
-      setError(ERROR_CODES.UNKNOWN);
+      setError({ code: ERROR_CODES.UNKNOWN, context: 'deleteDraft' });
     }
   }, []);
 
   const handleAddToCart = useCallback(() => {
     if (!canAddToCart || !price) {
       if (validation && !validation.valid) {
-        setError(validation.errors[0]?.code || ERROR_CODES.UNKNOWN);
+        setError(validation.errors[0] || { code: ERROR_CODES.UNKNOWN });
       }
       return;
     }
@@ -454,19 +463,27 @@ export const ProductConfigurator: React.FC<ProductConfiguratorProps> = ({
     onAddToCart?.(currentConfig, price);
   }, [canAddToCart, validation, price, currentConfig, onAddToCart]);
 
-  const handleCopyShareUrl = useCallback(() => {
-    navigator.clipboard
-      .writeText(shareUrl)
-      .then(() => {})
-      .catch(() => {
-        setError(ERROR_CODES.UNKNOWN);
-      });
+  const handleCopyShareUrl = useCallback(async () => {
+    const attempt = ++clipboardAttemptRef.current;
+    setError((current) => (current?.context === 'clipboard' ? null : current));
+    try {
+      await navigator.clipboard.writeText(shareUrl);
+    } catch {
+      if (attempt === clipboardAttemptRef.current) {
+        setError((current) =>
+          current && current.context !== 'clipboard'
+            ? current
+            : { code: ERROR_CODES.UNKNOWN, context: 'clipboard' },
+        );
+      }
+    }
   }, [shareUrl]);
 
   const handleModalClose = useCallback((modalType: 'draft' | 'share') => {
     if (modalType === 'draft') {
       setShowDraftModal(false);
     } else {
+      clipboardAttemptRef.current++;
       setShowShareModal(false);
     }
   }, []);
@@ -743,8 +760,10 @@ export const ProductConfigurator: React.FC<ProductConfiguratorProps> = ({
   const renderErrorMessage = () =>
     (error || priceError || validationError) && (
       <div className="error-message" role="alert">
-        <div>Something went wrong. Please try again.</div>
-        <div className="error-code">Error: {error || priceError || validationError}</div>
+        {getErrorMessage(
+          error ||
+            (priceError ? { code: priceError } : { code: validationError!, context: 'validation' }),
+        )}
       </div>
     );
 
@@ -911,6 +930,7 @@ export const ProductConfigurator: React.FC<ProductConfiguratorProps> = ({
             className="btn btn-secondary"
             onClick={(e) => {
               lastFocusedElement.current = e.currentTarget;
+              setError((current) => (current?.context === 'listDrafts' ? null : current));
               setShowDraftModal(true);
             }}
           >
@@ -937,7 +957,7 @@ export const ProductConfigurator: React.FC<ProductConfiguratorProps> = ({
 
       {validation?.warnings.map((warning, i) => (
         <div key={i} className="validation-warning" role="status">
-          {warning.message}
+          {getErrorMessage(warning)}
         </div>
       ))}
 
@@ -973,7 +993,7 @@ export const ProductConfigurator: React.FC<ProductConfiguratorProps> = ({
               {validation
                 ? validation.valid
                   ? '✓ Configuration validated'
-                  : `✗ Configuration invalid. ${validation.errors.map((issue) => issue.message).join(' ')}`
+                  : `✗ Configuration invalid. ${validation.errors.map(getErrorMessage).join(' ')}`
                 : validationError
                   ? '✗ Validation failed'
                   : '⏳ Validating…'}
