@@ -309,10 +309,6 @@ export const ProductConfigurator: React.FC<ProductConfiguratorProps> = ({
   }, [currentConfig, onConfigurationChange]);
 
   useEffect(() => {
-    setIsDirty(true);
-  }, [selections, selectedAddOns, quantity]);
-
-  useEffect(() => {
     if (showDraftModal) {
       getAllDrafts()
         .then(setDrafts)
@@ -357,6 +353,8 @@ export const ProductConfigurator: React.FC<ProductConfiguratorProps> = ({
 
   const handleOptionChange = useCallback(
     (optionId: string, value: string | number | boolean) => {
+      setIsDirty(true);
+
       setOptionState((prev) =>
         getOptionState(product, { ...prev.selections, [optionId]: value }, prev.selectedAddOns),
       );
@@ -373,6 +371,8 @@ export const ProductConfigurator: React.FC<ProductConfiguratorProps> = ({
         setError({ code: ERROR_CODES.DEPENDENCY_MISSING });
         return;
       }
+
+      setIsDirty(true);
 
       setOptionState((prev) => {
         // Check the queued state too: an earlier option change may have disabled this add-on.
@@ -397,9 +397,13 @@ export const ProductConfigurator: React.FC<ProductConfiguratorProps> = ({
       const max = quantityOption?.max ?? 999;
 
       const clampedQuantity = Math.max(min, Math.min(max, newQuantity));
+
+      if (clampedQuantity === quantity) return;
+
       setQuantity(clampedQuantity);
+      setIsDirty(true);
     },
-    [product.options],
+    [product.options, quantity],
   );
 
   const handleSaveDraft = useCallback(async () => {
